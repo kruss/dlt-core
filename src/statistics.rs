@@ -18,7 +18,7 @@ use crate::{
         skip_till_after_next_storage_header, validated_payload_length, DltParseError,
     },
 };
-use buf_redux::{policy::MinBuffered, BufReader as ReduxReader};
+use bufread::BufReader;
 use nom::bytes::streaming::take;
 use rustc_hash::FxHashMap;
 use std::{
@@ -227,9 +227,7 @@ pub struct StatisticRowInfo {
 /// Read in a DLT file and collect some statistics about it
 pub fn collect_dlt_stats(in_file: &Path) -> Result<StatisticInfo, DltParseError> {
     let f = fs::File::open(in_file)?;
-
-    let mut reader = ReduxReader::with_capacity(BIN_READER_CAPACITY, f)
-        .set_policy(MinBuffered(BIN_MIN_BUFFER_SPACE));
+    let mut reader = BufReader::new(BIN_READER_CAPACITY, BIN_MIN_BUFFER_SPACE, f);
 
     let mut app_ids: IdMap = FxHashMap::default();
     let mut context_ids: IdMap = FxHashMap::default();
@@ -309,7 +307,7 @@ pub fn collect_dlt_stats(in_file: &Path) -> Result<StatisticInfo, DltParseError>
 }
 
 fn read_one_dlt_message_info<T: Read>(
-    reader: &mut ReduxReader<T, MinBuffered>,
+    reader: &mut BufReader<T>,
     with_storage_header: bool,
 ) -> Result<Option<(u64, StatisticRowInfo)>, DltParseError> {
     match reader.fill_buf() {
@@ -390,9 +388,7 @@ fn add_for_level(level: Option<LogLevel>, ids: &mut IdMap, id: String) {
 pub fn count_dlt_messages(input: &Path) -> Result<u64, DltParseError> {
     if input.exists() {
         let f = fs::File::open(input)?;
-
-        let mut reader = ReduxReader::with_capacity(BIN_READER_CAPACITY, f)
-            .set_policy(MinBuffered(BIN_MIN_BUFFER_SPACE));
+        let mut reader = BufReader::new(BIN_READER_CAPACITY, BIN_MIN_BUFFER_SPACE, f);
 
         let mut msg_cnt: u64 = 0;
         loop {
