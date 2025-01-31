@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2025-01-31
+### Changed
+- Removed buf_redux dependency from statistics
+
 ## [0.18.0] - 2024-12-18
 ### Changed
 - Add feature "serde-support", which adds to crate's types Serialize/Deserialize

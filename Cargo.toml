@@ -1,6 +1,6 @@
 [package]
 name = "dlt-core"
-version = "0.18.0"
+version = "0.19.0"
 authors = ["esrlabs.com"]
 edition = "2021"
 description = """
@@ -10,7 +10,6 @@ license = "Apache-2.0"
 repository = "https://github.com/esrlabs/dlt-core"
 
 [dependencies]
-buf_redux = { version = "0.8.4", optional = true }
 byteorder = "1.4"
 bytes = "1.0"
 derive_more = "0.99.13"
@@ -26,7 +25,7 @@ thiserror = "1.0"
 
 [features]
 default = []
-statistics = [ "buf_redux" ]
+statistics = []
 debug_parser = []
 serde-support = [
     "serde",

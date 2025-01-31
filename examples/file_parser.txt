@@ -1,3 +1,4 @@
+/// Use a buffered reader that will allow a minimum amount of data on refill.
 use buf_redux::{policy::MinBuffered, BufReader};
 use dlt_core::parse::{dlt_message, DltParseError};
 use std::{env, fs, fs::File, io::BufRead, path::PathBuf, time::Instant};
