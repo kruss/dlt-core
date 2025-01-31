@@ -252,7 +252,7 @@ pub(crate) fn dlt_standard_header(input: &[u8]) -> IResult<&[u8], StandardHeader
     Ok((
         input,
         StandardHeader::new(
-            header_type_byte >> 5 & 0b111,
+            (header_type_byte >> 5) & 0b111,
             if (header_type_byte & BIG_ENDIAN_FLAG) != 0 {
                 Endianness::Big
             } else {
@@ -1003,6 +1003,7 @@ pub(crate) fn skip_till_after_next_storage_header(
 }
 
 /// Remove the storage header from the input if present
+#[allow(clippy::useless_conversion)]
 pub fn skip_storage_header(input: &[u8]) -> Result<(&[u8], u64), DltParseError> {
     let (i, (_, _, _)): (&[u8], _) = tuple((tag("DLT"), tag(&[0x01]), take(12usize)))(input)
         .map_err(nom::Err::<DltParseError>::from)?;
@@ -1017,6 +1018,7 @@ pub fn skip_storage_header(input: &[u8]) -> Result<(&[u8], u64), DltParseError> 
 
 /// Skip one dlt message in the input stream in an efficient way
 /// pre: message to be parsed contains a storage header
+#[allow(clippy::useless_conversion)]
 pub fn dlt_consume_msg(input: &[u8]) -> Result<(&[u8], Option<u64>), DltParseError> {
     if input.is_empty() {
         return Ok((input, None));

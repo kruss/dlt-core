@@ -897,18 +897,18 @@ impl TryFrom<u32> for TypeInfo {
 }
 /// The following equation defines the relation between the logical value (log_v) and
 /// the physical value (phy_v), offset and quantization:
-///     log_v = phy_v * quantization + offset
+///   log_v = phy_v * quantization + offset
 ///
 /// * phy_v is what we received in the dlt message
 /// * log_v is the real value
-///     example: the degree celcius is transmitted,
-///     quantization = 0.01, offset = -50
-///     now the transmitted value phy_v = (log_v - offset)/quantization = 7785
+///   example: the degree celcius is transmitted,
+///   quantization = 0.01, offset = -50
+///   now the transmitted value phy_v = (log_v - offset)/quantization = 7785
 ///
 /// The width depends on the TYLE value
-///     * i32 bit if Type Length (TYLE) equals 1,2 or 3
-///     * i64 bit if Type Length (TYLE) equals 4
-///     * i128 bit if Type Length (TYLE) equals 5 (unsupported)
+///   * i32 bit if Type Length (TYLE) equals 1,2 or 3
+///   * i64 bit if Type Length (TYLE) equals 4
+///   * i128 bit if Type Length (TYLE) equals 5 (unsupported)
 #[cfg_attr(
     feature = "serde-support",
     derive(serde::Serialize, serde::Deserialize)
@@ -1874,10 +1874,10 @@ impl From<&MessageType> for u8 {
             {
                 u8::from(x)
             }
-            MessageType::ApplicationTrace(x) => 0x1 << 1 | u8::from(x),
-            MessageType::NetworkTrace(x) => 0x2 << 1 | u8::from(x),
-            MessageType::Control(x) => 0x3 << 1 | u8::from(x),
-            MessageType::Unknown((mstp, mtin)) => mstp << 1 | mtin << 4,
+            MessageType::ApplicationTrace(x) => (0x1 << 1) | u8::from(x),
+            MessageType::NetworkTrace(x) => (0x2 << 1) | u8::from(x),
+            MessageType::Control(x) => (0x3 << 1) | u8::from(x),
+            MessageType::Unknown((mstp, mtin)) => (mstp << 1) | (mtin << 4),
         }
     }
 }
