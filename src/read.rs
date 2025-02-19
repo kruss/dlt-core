@@ -1,0 +1,169 @@
+// Copyright 2021 by Accenture ESR
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! # dlt reading support
+use crate::{
+    dlt::{HEADER_MIN_LENGTH, STORAGE_HEADER_LENGTH},
+    filtering::ProcessedDltFilterConfig,
+    parse::{dlt_message, parse_length, DltParseError, ParsedMessage},
+};
+use std::io::{BufReader, Read};
+
+const DEFAULT_BUFFER_CAPACITY: usize = 10 * 1024 * 1024;
+const DEFAULT_MESSAGE_MAX_LEN: usize = 10 * 1024;
+
+/// Read and parse the next DLT message from the given reader, if any
+pub fn read_message<S: Read>(
+    reader: &mut DltMessageReader<S>,
+    filter_config_opt: Option<&ProcessedDltFilterConfig>,
+) -> Result<Option<ParsedMessage>, DltParseError> {
+    let with_storage_header = reader.with_storage_header();
+    let slice = reader.next_message_slice()?;
+
+    if !slice.is_empty() {
+        Ok(Some(
+            dlt_message(slice, filter_config_opt, with_storage_header)?.1,
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Buffered reader for DLT message slices from a source.
+pub struct DltMessageReader<S: Read> {
+    source: BufReader<S>,
+    with_storage_header: bool,
+    buffer: Vec<u8>,
+}
+
+impl<S: Read> DltMessageReader<S> {
+    /// Create a new reader for the given source.
+    pub fn new(source: S, with_storage_header: bool) -> Self {
+        DltMessageReader::with_capacity(
+            DEFAULT_BUFFER_CAPACITY,
+            DEFAULT_MESSAGE_MAX_LEN,
+            source,
+            with_storage_header,
+        )
+    }
+
+    /// Create a new reader for the given source and specified capacities.
+    pub fn with_capacity(
+        buffer_capacity: usize,
+        message_max_len: usize,
+        source: S,
+        with_storage_header: bool,
+    ) -> Self {
+        debug_assert!(buffer_capacity >= message_max_len);
+
+        DltMessageReader {
+            source: BufReader::with_capacity(buffer_capacity, source),
+            with_storage_header,
+            buffer: vec![0u8; message_max_len],
+        }
+    }
+
+    /// Read the next message slice from the source,
+    /// or return an empty slice if no more message could be read.
+    pub fn next_message_slice(&mut self) -> Result<&[u8], DltParseError> {
+        let storage_len = if self.with_storage_header {
+            STORAGE_HEADER_LENGTH as usize
+        } else {
+            0
+        };
+        let header_len = storage_len + HEADER_MIN_LENGTH as usize;
+
+        if self
+            .source
+            .read_exact(&mut self.buffer[..header_len])
+            .is_err()
+        {
+            return Ok(&[]);
+        }
+
+        let (_, generated_message_count) = parse_length(&self.buffer[storage_len..header_len])?;
+        let total_len = storage_len + generated_message_count;
+
+        self.source
+            .read_exact(&mut self.buffer[header_len..total_len])?;
+
+        Ok(&self.buffer[..total_len])
+    }
+
+    /// Answer if message slices contain a `StorageHeader´.
+    pub fn with_storage_header(&self) -> bool {
+        self.with_storage_header
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proptest_strategies::stored_messages_strat;
+    use crate::tests::DLT_ROUNDTRIP_MESSAGE;
+    use proptest::prelude::*;
+
+    #[test]
+    fn test_next_message() {
+        let mut reader = DltMessageReader::new(DLT_ROUNDTRIP_MESSAGE, true);
+        assert!(reader.with_storage_header());
+
+        let message = reader.next_message_slice().expect("message");
+        assert_eq!(DLT_ROUNDTRIP_MESSAGE, message);
+
+        assert!(reader.next_message_slice().expect("message").is_empty());
+    }
+
+    #[test]
+    fn test_read_message() {
+        let mut reader = DltMessageReader::new(DLT_ROUNDTRIP_MESSAGE, true);
+        assert!(reader.with_storage_header());
+
+        if let Some(ParsedMessage::Item(message)) =
+            read_message(&mut reader, None).expect("message")
+        {
+            assert_eq!(DLT_ROUNDTRIP_MESSAGE, message.as_bytes());
+        }
+
+        assert_eq!(None, read_message(&mut reader, None).expect("message"))
+    }
+
+    proptest! {
+        #[test]
+        fn test_read_messages_proptest(messages in stored_messages_strat(10)) {
+            let generated_message_count = messages.len();
+            let mut parsed_message_count = 0usize;
+
+            let mut bytes = vec![];
+            for message in messages {
+                let message_bytes = message.as_bytes();
+                bytes.extend(message_bytes);
+            }
+
+            let mut reader = DltMessageReader::new(bytes.as_slice(), true);
+            loop {
+                match read_message(&mut reader, None).expect("read") {
+                    Some(_message) => {
+                        parsed_message_count += 1;
+                    }
+                    None => {
+                        break;
+                    }
+                };
+            }
+
+            assert_eq!(generated_message_count, parsed_message_count);
+        }
+    }
+}
