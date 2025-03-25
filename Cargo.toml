@@ -1,6 +1,6 @@
 [package]
 name = "dlt-core"
-version = "0.20.0"
+version = "0.21.0"
 authors = ["esrlabs.com"]
 edition = "2021"
 description = """
@@ -50,6 +50,14 @@ harness = false
 [[example]]
 name = "file_parser"
 path = "examples/file_parser.rs"
+
+[[example]]
+name = "file_lazy"
+path = "examples/file_lazy.rs"
+
+[[example]]
+name = "file_eager"
+path = "examples/file_eager.rs"
 
 [[example]]
 name = "file_streamer"

@@ -23,6 +23,8 @@ pub mod dlt;
 #[cfg(feature = "fibex")]
 pub mod fibex;
 pub mod filtering;
+/// TODO temp
+pub mod lazy;
 pub mod parse;
 pub mod read;
 #[cfg(feature = "stream")]

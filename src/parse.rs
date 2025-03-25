@@ -200,7 +200,7 @@ fn maybe_parse_u32(a: bool) -> impl Fn(&[u8]) -> IResult<&[u8], Option<u32>, Dlt
     }
 }
 
-fn add_context(ne: nom::Err<DltParseError>, desc: String) -> nom::Err<DltParseError> {
+pub(crate) fn add_context(ne: nom::Err<DltParseError>, desc: String) -> nom::Err<DltParseError> {
     match ne {
         nom::Err::Incomplete(n) => nom::Err::Incomplete(n),
         nom::Err::Error(e) => {
@@ -328,7 +328,10 @@ pub fn dlt_zero_terminated_string(s: &[u8], size: usize) -> Result<(&[u8], &str)
 ///
 /// In various places within the DLT message, there can be strings that are
 /// terminated with a `\0`.
-fn dlt_zero_terminated_string_intern(s: &[u8], size: usize) -> IResult<&[u8], &str, DltParseError> {
+pub(crate) fn dlt_zero_terminated_string_intern(
+    s: &[u8],
+    size: usize,
+) -> IResult<&[u8], &str, DltParseError> {
     let (rest_with_null, content_without_null) = take_while_m_n(0, size, is_not_null)(s)?;
     let res_str = match nom::lib::std::str::from_utf8(content_without_null) {
         Ok(content) => content,
@@ -342,7 +345,9 @@ fn dlt_zero_terminated_string_intern(s: &[u8], size: usize) -> IResult<&[u8], &s
     Ok((rest, res_str))
 }
 
-fn dlt_variable_name<T: NomByteOrder>(input: &[u8]) -> IResult<&[u8], String, DltParseError> {
+pub(crate) fn dlt_variable_name<T: NomByteOrder>(
+    input: &[u8],
+) -> IResult<&[u8], String, DltParseError> {
     let (i, size) = T::parse_u16(input)?;
     let (i2, name) = dlt_zero_terminated_string_intern(i, size as usize)?;
     Ok((i2, name.to_string()))
@@ -396,7 +401,7 @@ impl NomByteOrder for BigEndian {
 }
 
 #[allow(clippy::type_complexity)]
-fn dlt_variable_name_and_unit<T: NomByteOrder>(
+pub(crate) fn dlt_variable_name_and_unit<T: NomByteOrder>(
     type_info: &TypeInfo,
 ) -> fn(&[u8]) -> IResult<&[u8], (Option<String>, Option<String>), DltParseError> {
     if type_info.has_variable_info {
@@ -746,8 +751,13 @@ fn dlt_payload<T: NomByteOrder>(
 }
 
 #[inline]
-fn dbg_parsed<T: std::fmt::Debug>(_name: &str, _before: &[u8], _after: &[u8], _value: &T) {
-    // #[cfg(feature = "debug")]
+pub(crate) fn dbg_parsed<T: std::fmt::Debug>(
+    _name: &str,
+    _before: &[u8],
+    _after: &[u8],
+    _value: &T,
+) {
+    #[cfg(feature = "debug")]
     {
         let input_len = _before.len();
         let now_len = _after.len();
