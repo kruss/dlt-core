@@ -58,7 +58,7 @@ impl fmt::Display for MessageFormatter<'_> {
         write!(f, "{}:{} ", timestamp.seconds, timestamp.microseconds)?;
 
         let message = self.message.message();
-        let standard_header = message.standard_header();
+        let standard_header = message.standard_header().expect("standard_header");
         write!(f, "V{} ", standard_header.version().expect("version"))?;
         write!(
             f,

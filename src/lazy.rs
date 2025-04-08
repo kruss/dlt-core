@@ -63,10 +63,8 @@ impl<'a> StorageHeaderSlice<'a> {
 
     #[allow(clippy::useless_conversion)]
     pub fn ecu_id(&self) -> Result<&str, DltParseError> {
-        let (_, (_, buffer)) = tuple((take(12usize), take(4usize)))(self.slice)
-            .map_err(nom::Err::<DltParseError>::from)?;
-
-        match str::from_utf8(buffer) {
+        let offset = 12usize;
+        match str::from_utf8(&self.slice[offset..(offset + 4usize)]) {
             Ok(value) => Ok(value),
             Err(error) => Err(DltParseError::ParsingHickup(format!(
                 "invalid UTF-8 sequence: {}",
@@ -85,23 +83,23 @@ impl<'a> MessageSlice<'a> {
         MessageSlice { slice }
     }
 
-    pub fn standard_header(&self) -> StandardHeaderSlice {
+    pub fn standard_header(&self) -> Result<StandardHeaderSlice, DltParseError> {
         StandardHeaderSlice::new(self.slice)
     }
 
     pub fn extended_header(&self) -> Result<Option<ExtendedHeaderSlice>, DltParseError> {
-        let standard_header = self.standard_header();
+        let standard_header = self.standard_header()?;
         if standard_header.with_extended_header()? {
             Ok(Some(ExtendedHeaderSlice::new(
                 &self.slice[standard_header.length()? as usize..],
-            )))
+            )?))
         } else {
             Ok(None)
         }
     }
 
     pub fn payload(&self) -> Result<PayloadContent, DltParseError> {
-        let standard_header = self.standard_header();
+        let standard_header = self.standard_header()?;
         let mut total_headers_length = standard_header.length()?;
 
         let (verbose, argument_count, message_type) =
@@ -142,30 +140,30 @@ impl<'a> MessageSlice<'a> {
 }
 
 pub struct StandardHeaderSlice<'a> {
+    header_type_byte: u8,
     slice: &'a [u8],
 }
 
 impl<'a> StandardHeaderSlice<'a> {
-    pub fn new(slice: &'a [u8]) -> Self {
-        StandardHeaderSlice { slice }
+    #[allow(clippy::useless_conversion)]
+    pub fn new(slice: &'a [u8]) -> Result<Self, DltParseError> {
+        let (_, header_type_byte) = be_u8(slice).map_err(nom::Err::<DltParseError>::from)?;
+        Ok(StandardHeaderSlice {
+            header_type_byte,
+            slice,
+        })
     }
 
     fn length(&self) -> Result<u16, DltParseError> {
-        Ok(calculate_standard_header_length(self.header_type_byte()?))
-    }
-
-    #[allow(clippy::useless_conversion)]
-    fn header_type_byte(&self) -> Result<u8, DltParseError> {
-        let (_, value) = be_u8(self.slice).map_err(nom::Err::<DltParseError>::from)?;
-        Ok(value)
+        Ok(calculate_standard_header_length(self.header_type_byte))
     }
 
     pub fn with_extended_header(&self) -> Result<bool, DltParseError> {
-        Ok(self.header_type_byte()? & WITH_EXTENDED_HEADER_FLAG != 0)
+        Ok(self.header_type_byte & WITH_EXTENDED_HEADER_FLAG != 0)
     }
 
     pub fn endianness(&self) -> Result<Endianness, DltParseError> {
-        if (self.header_type_byte()? & BIG_ENDIAN_FLAG) != 0 {
+        if (self.header_type_byte & BIG_ENDIAN_FLAG) != 0 {
             Ok(Endianness::Big)
         } else {
             Ok(Endianness::Little)
@@ -173,42 +171,38 @@ impl<'a> StandardHeaderSlice<'a> {
     }
 
     pub fn with_ecu_id(&self) -> Result<bool, DltParseError> {
-        Ok(self.header_type_byte()? & WITH_ECU_ID_FLAG != 0)
+        Ok(self.header_type_byte & WITH_ECU_ID_FLAG != 0)
     }
 
     pub fn with_session_id(&self) -> Result<bool, DltParseError> {
-        Ok(self.header_type_byte()? & WITH_SESSION_ID_FLAG != 0)
+        Ok(self.header_type_byte & WITH_SESSION_ID_FLAG != 0)
     }
 
     pub fn with_timestamp(&self) -> Result<bool, DltParseError> {
-        Ok(self.header_type_byte()? & WITH_TIMESTAMP_FLAG != 0)
+        Ok(self.header_type_byte & WITH_TIMESTAMP_FLAG != 0)
     }
 
     pub fn version(&self) -> Result<u8, DltParseError> {
-        Ok((self.header_type_byte()? >> 5) & 0b111)
+        Ok((self.header_type_byte >> 5) & 0b111)
     }
 
     #[allow(clippy::useless_conversion)]
     pub fn message_counter(&self) -> Result<u8, DltParseError> {
-        let (_, (_, value)) =
-            tuple((take(1usize), be_u8))(self.slice).map_err(nom::Err::<DltParseError>::from)?;
+        let (_, value) = be_u8(&self.slice[1usize..]).map_err(nom::Err::<DltParseError>::from)?;
         Ok(value)
     }
 
     #[allow(clippy::useless_conversion)]
     pub fn message_length(&self) -> Result<u16, DltParseError> {
-        let (_, (_, value)) =
-            tuple((take(2usize), be_u16))(self.slice).map_err(nom::Err::<DltParseError>::from)?;
+        let (_, value) = be_u16(&self.slice[2usize..]).map_err(nom::Err::<DltParseError>::from)?;
         Ok(value)
     }
 
     #[allow(clippy::useless_conversion)]
     pub fn ecu_id(&self) -> Result<Option<&str>, DltParseError> {
         if self.with_ecu_id()? {
-            let (_, (_, buffer)) = tuple((take(4usize), take(4usize)))(self.slice)
-                .map_err(nom::Err::<DltParseError>::from)?;
-
-            match str::from_utf8(buffer) {
+            let offset = 4usize;
+            match str::from_utf8(&self.slice[offset..(offset + 4usize)]) {
                 Ok(value) => Ok(Some(value)),
                 Err(error) => Err(DltParseError::ParsingHickup(format!(
                     "invalid UTF-8 sequence: {}",
@@ -227,10 +221,7 @@ impl<'a> StandardHeaderSlice<'a> {
             if self.with_ecu_id()? {
                 offset += 4usize;
             }
-            let (_, (_, buffer)) = tuple((take(offset), take(4usize)))(self.slice)
-                .map_err(nom::Err::<DltParseError>::from)?;
-
-            match str::from_utf8(buffer) {
+            match str::from_utf8(&self.slice[offset..(offset + 4usize)]) {
                 Ok(value) => Ok(Some(value)),
                 Err(error) => Err(DltParseError::ParsingHickup(format!(
                     "invalid UTF-8 sequence: {}",
@@ -252,9 +243,8 @@ impl<'a> StandardHeaderSlice<'a> {
             if self.with_session_id()? {
                 offset += 4usize;
             }
-            let (_, (_, value)) = tuple((take(offset), be_u32))(self.slice)
-                .map_err(nom::Err::<DltParseError>::from)?;
-
+            let (_, value) =
+                be_u32(&self.slice[offset..]).map_err(nom::Err::<DltParseError>::from)?;
             Ok(Some(value))
         } else {
             Ok(None)
@@ -263,26 +253,26 @@ impl<'a> StandardHeaderSlice<'a> {
 }
 
 pub struct ExtendedHeaderSlice<'a> {
+    message_info_byte: u8,
     slice: &'a [u8],
 }
 
 impl<'a> ExtendedHeaderSlice<'a> {
-    pub fn new(slice: &'a [u8]) -> Self {
-        ExtendedHeaderSlice { slice }
-    }
-
     #[allow(clippy::useless_conversion)]
-    fn message_info_byte(&self) -> Result<u8, DltParseError> {
-        let (_, value) = be_u8(self.slice).map_err(nom::Err::<DltParseError>::from)?;
-        Ok(value)
+    pub fn new(slice: &'a [u8]) -> Result<Self, DltParseError> {
+        let (_, message_info_byte) = be_u8(slice).map_err(nom::Err::<DltParseError>::from)?;
+        Ok(ExtendedHeaderSlice {
+            message_info_byte,
+            slice,
+        })
     }
 
     pub fn verbose(&self) -> Result<bool, DltParseError> {
-        Ok((self.message_info_byte()? & VERBOSE_FLAG) != 0)
+        Ok((self.message_info_byte & VERBOSE_FLAG) != 0)
     }
 
     pub fn message_type(&self) -> Result<MessageType, DltParseError> {
-        match MessageType::try_from(self.message_info_byte()?) {
+        match MessageType::try_from(self.message_info_byte) {
             Ok(message_type) => Ok(message_type),
             Err(error) => Err(DltParseError::ParsingHickup(format!(
                 "invalid message type: {}",
@@ -293,17 +283,14 @@ impl<'a> ExtendedHeaderSlice<'a> {
 
     #[allow(clippy::useless_conversion)]
     pub fn argument_count(&self) -> Result<u8, DltParseError> {
-        let (_, (_, value)) =
-            tuple((take(1usize), be_u8))(self.slice).map_err(nom::Err::<DltParseError>::from)?;
+        let (_, value) = be_u8(&self.slice[1usize..]).map_err(nom::Err::<DltParseError>::from)?;
         Ok(value)
     }
 
     #[allow(clippy::useless_conversion)]
     pub fn application_id(&self) -> Result<&str, DltParseError> {
-        let (_, (_, buffer)) = tuple((take(2usize), take(4usize)))(self.slice)
-            .map_err(nom::Err::<DltParseError>::from)?;
-
-        match str::from_utf8(buffer) {
+        let offset = 2usize;
+        match str::from_utf8(&self.slice[offset..(offset + 4usize)]) {
             Ok(value) => Ok(value),
             Err(error) => Err(DltParseError::ParsingHickup(format!(
                 "invalid UTF-8 sequence: {}",
@@ -314,10 +301,8 @@ impl<'a> ExtendedHeaderSlice<'a> {
 
     #[allow(clippy::useless_conversion)]
     pub fn context_id(&self) -> Result<&str, DltParseError> {
-        let (_, (_, buffer)) = tuple((take(6usize), take(4usize)))(self.slice)
-            .map_err(nom::Err::<DltParseError>::from)?;
-
-        match str::from_utf8(buffer) {
+        let offset = 6usize;
+        match str::from_utf8(&self.slice[offset..(offset + 4usize)]) {
             Ok(value) => Ok(value),
             Err(error) => Err(DltParseError::ParsingHickup(format!(
                 "invalid UTF-8 sequence: {}",
@@ -683,7 +668,7 @@ mod tests {
 
         let message = stored_message.message();
 
-        let standard_header = message.standard_header();
+        let standard_header = message.standard_header().expect("standard_header");
         assert_eq!(4, standard_header.length().expect("length"));
         assert!(standard_header
             .with_extended_header()
