@@ -901,7 +901,8 @@ impl TryFrom<u32> for TypeInfo {
 ///
 /// * phy_v is what we received in the dlt message
 /// * log_v is the real value
-///     example: the degree celcius is transmitted,
+///
+/// Example: the degree celcius is transmitted,
 ///     quantization = 0.01, offset = -50
 ///     now the transmitted value phy_v = (log_v - offset)/quantization = 7785
 ///
