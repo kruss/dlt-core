@@ -16,7 +16,7 @@
 use crate::{
     dlt::{HEADER_MIN_LENGTH, STORAGE_HEADER_LENGTH},
     filtering::ProcessedDltFilterConfig,
-    parse::{dlt_message, parse_length, DltParseError, ParsedMessage},
+    parse::{dlt_message, parse_length, DltParseError, ParsedMessage, DLT_PATTERN},
 };
 use std::io::{BufReader, Read};
 
@@ -69,7 +69,7 @@ impl<S: Read> DltMessageReader<S> {
         source: S,
         with_storage_header: bool,
     ) -> Self {
-        debug_assert!(buffer_capacity >= message_max_len);
+        assert!(buffer_capacity >= message_max_len);
 
         DltMessageReader {
             source: BufReader::with_capacity(buffer_capacity, source),
@@ -81,30 +81,51 @@ impl<S: Read> DltMessageReader<S> {
     /// Read the next message slice from the source,
     /// or return an empty slice if no more message could be read.
     pub fn next_message_slice(&mut self) -> Result<&[u8], DltParseError> {
-        let storage_len = if self.with_storage_header {
-            STORAGE_HEADER_LENGTH as usize
-        } else {
-            0
-        };
-        let header_len = storage_len + HEADER_MIN_LENGTH as usize;
-        debug_assert!(header_len <= self.buffer.len());
+        loop {
+            let storage_len = if self.with_storage_header {
+                let storage_len = STORAGE_HEADER_LENGTH as usize;
 
-        if self
-            .source
-            .read_exact(&mut self.buffer[..header_len])
-            .is_err()
-        {
-            return Ok(&[]);
+                loop {
+                    if self
+                        .source
+                        .read_exact(&mut self.buffer[..storage_len])
+                        .is_err()
+                    {
+                        return Ok(&[]);
+                    }
+
+                    if &self.buffer[..DLT_PATTERN.len()] == DLT_PATTERN {
+                        break;
+                    }
+                }
+
+                storage_len
+            } else {
+                0
+            };
+
+            let header_len = storage_len + HEADER_MIN_LENGTH as usize;
+
+            if self
+                .source
+                .read_exact(&mut self.buffer[storage_len..header_len])
+                .is_err()
+            {
+                return Ok(&[]);
+            }
+
+            let (_, message_len) = parse_length(&self.buffer[storage_len..header_len])?;
+
+            let total_len = storage_len + message_len as usize;
+            if total_len < header_len {
+                continue;
+            }
+
+            self.source
+                .read_exact(&mut self.buffer[header_len..total_len])?;
+
+            return Ok(&self.buffer[..total_len]);
         }
-
-        let (_, message_len) = parse_length(&self.buffer[storage_len..header_len])?;
-        let total_len = storage_len + message_len as usize;
-        debug_assert!(total_len <= self.buffer.len());
-
-        self.source
-            .read_exact(&mut self.buffer[header_len..total_len])?;
-
-        Ok(&self.buffer[..total_len])
     }
 
     /// Answer if message slices contain a `StorageHeader´.
@@ -163,8 +184,36 @@ mod tests {
                 assert_eq!(bytes, message.as_bytes());
             }
 
-            assert_eq!(None, read_message(&mut reader, None).expect("message"))
+            assert_eq!(None, read_message(&mut reader, None).expect("message"));
         }
+    }
+
+    #[test]
+    fn test_read_message_robustness() {
+        #[rustfmt::skip]
+        let bytes = [
+            [
+                // --------------- storage header with invalid dlt-pattern
+                0xFF, 0x4C, 0x54, 0x01, 0x2B, 0x2C, 0xC9, 0x4D, 
+                0x7A, 0xE8, 0x01, 0x00, 0x45, 0x43, 0x55, 0x00, 
+            ]
+            .to_vec(),
+            [
+                // --------------- storage header
+                0x44, 0x4C, 0x54, 0x01, 0x2B, 0x2C, 0xC9, 0x4D, 
+                0x7A, 0xE8, 0x01, 0x00, 0x45, 0x43, 0x55, 0x00, 
+                // --------------- standard header with invalid length
+                0x21, 0x0A, 0x00, 0x00,
+            ]
+            .to_vec(),
+            DLT_MESSAGE_WITH_STORAGE_HEADER.to_vec(),
+        ]
+        .concat();
+
+        let mut reader = DltMessageReader::new(bytes.as_slice(), true);
+
+        assert!(read_message(&mut reader, None).expect("message").is_some());
+        assert!(read_message(&mut reader, None).expect("message").is_none());
     }
 
     proptest! {
@@ -172,6 +221,7 @@ mod tests {
         fn test_read_messages_proptest(messages in messages_strat(10)) {
             test_read_messages(messages, false);
         }
+
         #[test]
         fn test_read_messages_with_storage_header_proptest(messages in messages_with_storage_header_strat(10)) {
             test_read_messages(messages, true);

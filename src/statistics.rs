@@ -41,7 +41,7 @@ pub struct Statistic<'a> {
     pub is_verbose: bool,
 }
 
-/// Collect DLT statistics from the given reader.
+/// Collect all DLT statistics from the given reader.
 pub fn collect_statistics<S: Read>(
     reader: &mut DltMessageReader<S>,
     collector: &mut impl StatisticCollector,
@@ -54,48 +54,63 @@ pub fn collect_statistics<S: Read>(
             break;
         }
 
-        let (rest_before_standard_header, storage_header) = if with_storage_header {
-            let result = dlt_storage_header(slice)?;
-            let rest = result.0;
-            let header = if let Some(header) = result.1 {
-                Some(header.0)
-            } else {
-                None
-            };
-            (rest, header)
-        } else {
-            (slice, None)
-        };
-
-        let (rest_after_standard_header, standard_header) =
-            dlt_standard_header(rest_before_standard_header)?;
-
-        let (rest_after_all_headers, extended_header, log_level, is_verbose) =
-            if standard_header.has_extended_header {
-                let result = dlt_extended_header(rest_after_standard_header)?;
-                let rest = result.0;
-                let header = result.1;
-                let level = match header.message_type {
-                    MessageType::Log(level) => Some(level),
-                    _ => None,
-                };
-                let verbose = header.verbose;
-                (rest, Some(header), level, verbose)
-            } else {
-                (rest_after_standard_header, None, None, false)
-            };
-
-        collector.collect_statistic(Statistic {
-            log_level,
-            storage_header,
-            standard_header,
-            extended_header,
-            payload: rest_after_all_headers,
-            is_verbose,
-        })?;
+        match next_statistic(slice, with_storage_header) {
+            Ok(statistic) => {
+                collector.collect_statistic(statistic)?;
+            }
+            Err(error) => match error {
+                DltParseError::ParsingHickup(_) => {
+                    continue;
+                }
+                _ => return Err(error),
+            },
+        }
     }
 
     Ok(())
+}
+
+/// Return single DLT statistic from the given slice.
+fn next_statistic(slice: &[u8], with_storage_header: bool) -> Result<Statistic, DltParseError> {
+    let (rest_before_standard_header, storage_header) = if with_storage_header {
+        let result = dlt_storage_header(slice)?;
+        let rest = result.0;
+        let header = if let Some(header) = result.1 {
+            Some(header.0)
+        } else {
+            None
+        };
+        (rest, header)
+    } else {
+        (slice, None)
+    };
+
+    let (rest_after_standard_header, standard_header) =
+        dlt_standard_header(rest_before_standard_header)?;
+
+    let (rest_after_all_headers, extended_header, log_level, is_verbose) =
+        if standard_header.has_extended_header {
+            let result = dlt_extended_header(rest_after_standard_header)?;
+            let rest = result.0;
+            let header = result.1;
+            let level = match header.message_type {
+                MessageType::Log(level) => Some(level),
+                _ => None,
+            };
+            let verbose = header.verbose;
+            (rest, Some(header), level, verbose)
+        } else {
+            (rest_after_standard_header, None, None, false)
+        };
+
+    Ok(Statistic {
+        log_level,
+        storage_header,
+        standard_header,
+        extended_header,
+        payload: rest_after_all_headers,
+        is_verbose,
+    })
 }
 
 /// Contains the common DLT statistics.
@@ -348,5 +363,39 @@ mod tests {
             assert_eq!(1, stats.ecu_ids.len());
             assert!(!stats.contained_non_verbose);
         }
+    }
+
+    #[test]
+    fn test_collect_statistics_robustness() {
+        #[rustfmt::skip]
+        let bytes = [
+            [
+                // --------------- storage header with invalid dlt-pattern
+                0xFF, 0x4C, 0x54, 0x01, 0x2B, 0x2C, 0xC9, 0x4D, 
+                0x7A, 0xE8, 0x01, 0x00, 0x45, 0x43, 0x55, 0x00, 
+            ]
+            .to_vec(),
+            [
+                // --------------- storage header
+                0x44, 0x4C, 0x54, 0x01, 0x2B, 0x2C, 0xC9, 0x4D, 
+                0x7A, 0xE8, 0x01, 0x00, 0x45, 0x43, 0x55, 0x00, 
+                // --------------- standard header with invalid length
+                0x21, 0x0A, 0x00, 0x00,
+            ]
+            .to_vec(),
+            DLT_MESSAGE_WITH_STORAGE_HEADER.to_vec(),
+        ]
+        .concat();
+
+        let mut reader = DltMessageReader::new(bytes.as_slice(), true);
+        let mut collector = StatisticInfoCollector::default();
+
+        collect_statistics(&mut reader, &mut collector).expect("collect statistics");
+        let stats = collector.collect();
+
+        assert_eq!(1, stats.app_ids.len());
+        assert_eq!(1, stats.context_ids.len());
+        assert_eq!(1, stats.ecu_ids.len());
+        assert!(!stats.contained_non_verbose);
     }
 }

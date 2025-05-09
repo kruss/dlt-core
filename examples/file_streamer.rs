@@ -1,4 +1,7 @@
-use dlt_core::stream::{read_message, DltStreamReader};
+use dlt_core::{
+    parse::DltParseError,
+    stream::{read_message, DltStreamReader},
+};
 use std::{env, fs, path::PathBuf, time::Instant};
 use tokio::fs::File;
 use tokio_util::compat::TokioAsyncReadCompatExt;
@@ -13,11 +16,21 @@ async fn main() {
     let mut dlt_reader = DltStreamReader::new(dlt_file.compat(), true);
     let mut message_count = 0usize;
     let start = Instant::now();
-    while let Some(_message) = read_message(&mut dlt_reader, None)
-        .await
-        .expect("read dlt message")
-    {
-        message_count += 1;
+    loop {
+        match read_message(&mut dlt_reader, None).await {
+            Ok(Some(_)) => {
+                message_count += 1;
+            }
+            Ok(None) => {
+                break;
+            }
+            Err(error) => match error {
+                DltParseError::ParsingHickup(_) => {
+                    continue;
+                }
+                _ => panic!("{}", error),
+            },
+        }
     }
     // print some stats
     let duration_in_s = start.elapsed().as_millis() as f64 / 1000.0;
